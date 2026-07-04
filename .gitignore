@@ -36,3 +36,4 @@ CLAUDE.md
 
 # --- Artefacts de build Python ---
 shared/build/
+.frp/

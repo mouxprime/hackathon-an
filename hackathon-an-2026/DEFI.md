@@ -103,7 +103,9 @@ Cochez les ressources utilisées en remplaçant `[ ]` par `[x]`.
 - [Catalogue MCP](docs/mcp-catalog.md)
 
 ### URL de démonstration
-Démonstration locale : `docker compose up -d` puis http://localhost:5173
+https://6fdd9766-00ca-467f-b05d-10994e05ea34.frp.hackathon2026.leximpact.dev
+
+(Tunnel FRP vers l'application locale — en local : `docker compose up -d` puis http://localhost:5173)
 
 ### Diapositives de présentation
 [Diapositives de présentation](docs/diapositives.pdf)
