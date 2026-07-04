@@ -106,4 +106,4 @@ Cochez les ressources utilisées en remplaçant `[ ]` par `[x]`.
 Démonstration locale : `docker compose up -d` puis http://localhost:5173
 
 ### Diapositives de présentation
-À venir.
+[Diapositives de présentation](docs/diapositives.pdf)
