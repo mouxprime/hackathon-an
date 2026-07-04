@@ -1,0 +1,38 @@
+# --- Environnement & secrets (JAMAIS commités) ---
+.env
+.env.*
+!.env.example
+
+# --- Cache des ZIPs open data AN (re-téléchargeables, ~55 MB) ---
+data/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# --- Node / frontend ---
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.local
+
+# --- OS / IDE ---
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.log
+
+# --- Outillage IA local (non livré) ---
+.claude/
+CLAUDE.md
+
+# --- Artefacts de build Python ---
+shared/build/

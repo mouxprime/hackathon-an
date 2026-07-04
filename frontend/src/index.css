@@ -1,0 +1,514 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Tokens (sous-ensemble Miradoor) — source de vérité pour le hors-Tailwind. */
+:root {
+  --bg: #f2f2f2;
+  --surface: #ffffff;
+  --cream: #faf7ef;
+  --navy: #223061;
+  --teal: #8a6420; /* accent or hémicycle */
+  --teal-hover: #7a571b;
+  --teal-light: #f8f2e3; /* fond sélection (clair) */
+  --border: #e2e8f0;
+  --text: #0f172a;
+  --text-2: #475569;
+  --shadow-card: 0 4px 14px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+
+/* Mode nuit (navy profond on-brand) — pivote sur la classe `.dark` du <html>. */
+.dark {
+  --bg: #0a1226;
+  --surface: #111a33;
+  --cream: #141d36;
+  --navy: #7ea1c4; /* accent navy clair, lisible sur fond sombre */
+  --teal: #1a97b9; /* accent teal plus lumineux sur fond sombre */
+  --teal-hover: #4daec9;
+  --teal-light: rgba(0, 133, 173, 0.15); /* fond sélection (nuit) */
+  --border: #1e2a47;
+  --text: #e8edf6;
+  --text-2: #93a4c4;
+  --shadow-card: 0 6px 18px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  @apply bg-slate-50 font-sans text-slate-800 antialiased dark:bg-ink-900 dark:text-slate-100;
+}
+
+/* React Flow rend chaque nœud focusable (drag/sélection au clavier) ; au clic
+ * sur du texte dans un widget, le navigateur posait un caret d'insertion
+ * clignotant alors que rien n'était éditable. On masque le caret par défaut
+ * et on le rétablit explicitement pour les éléments qui acceptent la saisie. */
+* { caret-color: transparent; }
+input, textarea, select,
+[contenteditable=""], [contenteditable="true"], [contenteditable="plaintext-only"],
+.ProseMirror { caret-color: auto; }
+
+.mono {
+  @apply font-mono;
+}
+
+/* --- Primitives de composants (cohérence du restyle, sans répétition) --- */
+@layer components {
+  .card {
+    @apply rounded-xl border border-slate-200 bg-white shadow-card
+           dark:border-ink-600 dark:bg-ink-800 dark:shadow-none;
+  }
+  .panel-h {
+    @apply flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-2.5
+           dark:border-ink-600;
+  }
+  .field {
+    @apply rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800
+           placeholder-slate-400 outline-none transition focus:border-teal-500
+           focus:ring-2 focus:ring-teal-500/15
+           dark:border-ink-600 dark:bg-ink-800 dark:text-slate-100 dark:placeholder-slate-500
+           dark:focus:border-teal-400 dark:focus:ring-teal-400/20;
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg bg-navy-700 px-3 py-1.5
+           text-sm font-semibold text-white transition hover:bg-navy-800 active:bg-navy-900
+           disabled:cursor-not-allowed disabled:opacity-40
+           dark:bg-navy-600 dark:hover:bg-navy-500 dark:active:bg-navy-700;
+  }
+  /* Bouton d'action accent or (charte « Hémicycle ») : CRÉER UNE
+     CONVERSATION, envoyer, confirmer — par opposition au navy de la marque. */
+  .btn-accent {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg bg-teal-500 px-3 py-1.5
+           text-sm font-semibold text-white transition hover:bg-teal-600 active:bg-teal-700
+           disabled:cursor-not-allowed disabled:opacity-40
+           dark:bg-teal-400 dark:hover:bg-teal-300 dark:active:bg-teal-500;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-300
+           bg-white px-3 py-1.5 text-sm font-semibold text-navy-700 transition
+           hover:border-navy-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40
+           dark:border-ink-600 dark:bg-ink-800 dark:text-navy-200
+           dark:hover:border-navy-500 dark:hover:bg-ink-700;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50
+           px-2 py-0.5 text-[11px] font-medium text-slate-600
+           dark:border-ink-600 dark:bg-ink-700 dark:text-slate-300;
+  }
+}
+
+/* --- Scrollbar (clair + nuit) --- */
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-thumb {
+  @apply rounded bg-slate-300 dark:bg-ink-600;
+}
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-slate-400 dark:bg-ink-500;
+}
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+/* --- react-grid-layout : overrides thème clair --- */
+.react-grid-item.react-grid-placeholder {
+  background: rgba(34, 48, 97, 0.1) !important; /* navy/10 */
+  border: 1px dashed rgba(34, 48, 97, 0.45);
+  border-radius: 12px;
+  opacity: 1 !important;
+  transition-duration: 100ms;
+}
+/* En mode nuit : placeholder sky translucide (visible sur fond bleu-nuit). */
+.dark .react-grid-item.react-grid-placeholder {
+  background: rgba(126, 161, 196, 0.14) !important;
+  border-color: rgba(126, 161, 196, 0.5);
+}
+
+.react-grid-item > .react-resizable-handle {
+  /* coin bas-droit du widget : poignée discrète mais visible au hover */
+  opacity: 0.3;
+}
+.react-grid-item:hover > .react-resizable-handle {
+  opacity: 0.8;
+}
+.react-grid-item > .react-resizable-handle::after {
+  border-color: rgb(100 116 139) !important; /* slate-500 */
+}
+.dark .react-grid-item > .react-resizable-handle::after {
+  border-color: rgb(148 163 184) !important; /* slate-400 */
+}
+
+/* Pendant le drag, le widget reste lisible (sinon image fantôme blanche). */
+.react-grid-item.react-draggable-dragging {
+  z-index: 50;
+  opacity: 0.95;
+  cursor: grabbing;
+}
+
+/* --- Leaflet (GeoMap) : assombrissement du fond de carte en mode nuit --- */
+.dark .leaflet-container {
+  background: #0a1226;
+}
+/* Filtre sombre porté par le WRAPPER du widget (cf. GeoMap.tsx → tilesDark) :
+ * il invertit toutes les tuiles du conteneur Leaflet quand la classe est posée.
+ * - Night : toujours actif (rendu cible du layer).
+ * - Railways : actif uniquement quand Hémicycle est en mode sombre.
+ * - Satellite / Day / Outdoor : jamais actif → vraies couleurs préservées. */
+.hemicycle-tiles-dark .leaflet-tile {
+  filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9);
+}
+.dark .leaflet-control-attribution {
+  background: rgba(17, 26, 51, 0.8) !important;
+  color: #93a4c4 !important;
+}
+.dark .leaflet-control-attribution a {
+  color: #7ea1c4 !important;
+}
+.dark .leaflet-bar a {
+  background: #111a33;
+  color: #e8edf6;
+  border-bottom-color: #1e2a47;
+}
+.dark .leaflet-bar a:hover {
+  background: #16203d;
+}
+.dark .leaflet-popup-content-wrapper,
+.dark .leaflet-popup-tip {
+  background: #111a33;
+  color: #e8edf6;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+}
+
+/* --- Marqueur carte animé (GeoMap) : point fixe + onde radar qui pulse --- */
+/* Couleur injectée par GeoMap via la var --mk (par discipline d'agent). */
+.hemicycle-marker {
+  position: relative;
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+.hemicycle-marker-dot {
+  position: absolute;
+  inset: 1px;
+  border-radius: 9999px;
+  background: var(--mk, #1f4f86);
+  border: 2px solid #ffffff;
+  box-shadow: 0 0 6px var(--mk, #1f4f86);
+}
+.hemicycle-marker-ping {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: var(--mk, #1f4f86);
+  animation: hemicyclePing 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+@keyframes hemicyclePing {
+  0%   { transform: scale(0.6); opacity: 0.55; }
+  70%  { transform: scale(2.6); opacity: 0; }
+  100% { transform: scale(2.6); opacity: 0; }
+}
+/* Accessibilité : pas d'animation si l'utilisateur la réduit. */
+@media (prefers-reduced-motion: reduce) {
+  .hemicycle-marker-ping { animation: none; opacity: 0; }
+}
+
+/* --- React Flow NodeResizer (WidgetCanvas) : zone sensible élargie, bords arrondis --- */
+/*
+ * Les lignes de redimensionnement passent de 1px à 12px de zone cliquable.
+ * Le transform: translate(-50%) existant de React Flow les centre déjà sur la
+ * bordure, donc élargir la largeur/hauteur étend symétriquement (6px dedans,
+ * 6px dehors). Visuellement transparentes → seule la bordure rounded-xl du
+ * widget reste visible, pas de rectangle parasite à coins droits.
+ */
+.widget-resize-line {
+  border-color: transparent !important;
+}
+.widget-resize-line.left,
+.widget-resize-line.right {
+  width: 12px !important;
+}
+.widget-resize-line.top,
+.widget-resize-line.bottom {
+  height: 12px !important;
+}
+
+/* Poignées de coin : cercles discrets, invisibles au repos, révélés au hover */
+.widget-resize-handle {
+  width: 10px !important;
+  height: 10px !important;
+  background: #ffffff !important;
+  border: 2px solid #223061 !important;
+  border-radius: 50% !important;
+  opacity: 0;
+  transition: opacity 0.18s ease, background 0.15s ease;
+}
+.react-flow__node:hover .widget-resize-handle {
+  opacity: 0.8;
+}
+.widget-resize-handle:hover {
+  opacity: 1 !important;
+  background: #223061 !important;
+}
+
+/* Mode nuit : accents sky à la place du navy */
+.dark .widget-resize-handle {
+  background: #111a33 !important;
+  border-color: #7ea1c4 !important;
+}
+.dark .widget-resize-handle:hover {
+  background: #7ea1c4 !important;
+}
+
+/* Resize diagonal only (texteditor) : un seul contrôle au coin bas-droit.
+   Pas de lignes, pas d'autres poignées — on force le ratio « page A4 ». */
+.widget-resize-control.widget-resize-control--diag {
+  background: transparent !important;
+  border: none !important;
+  width: 22px !important;
+  height: 22px !important;
+  cursor: nwse-resize !important;
+}
+.widget-resize-handle-diag {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 14px;
+  height: 14px;
+  border-right: 2.5px solid #223061;
+  border-bottom: 2.5px solid #223061;
+  border-bottom-right-radius: 4px;
+  opacity: 0.55;
+  transition: opacity 0.18s ease;
+  pointer-events: none;
+}
+.react-flow__node:hover .widget-resize-handle-diag,
+.widget-resize-control--diag:hover .widget-resize-handle-diag {
+  opacity: 1;
+}
+.dark .widget-resize-handle-diag {
+  border-right-color: #7ea1c4;
+  border-bottom-color: #7ea1c4;
+}
+
+/* --- React Flow (WidgetCanvas / WorkflowBuilder) : contrôles & attribution en nuit --- */
+.dark .react-flow__controls-button {
+  background: #111a33;
+  border-bottom-color: #1e2a47;
+  color: #e8edf6;
+  fill: #e8edf6;
+}
+.dark .react-flow__controls-button:hover {
+  background: #16203d;
+}
+.dark .react-flow__attribution {
+  background: rgba(17, 26, 51, 0.7);
+}
+.dark .react-flow__attribution a {
+  color: #93a4c4;
+}
+
+/* Placeholder TipTap — affiché quand l'éditeur est vide */
+.ProseMirror p.is-editor-empty:first-child::before {
+  content: "L'IA peut rédiger ici en direct — tapez ou lancez un rapport";
+  float: left;
+  color: #94a3b8;
+  pointer-events: none;
+  height: 0;
+}
+
+/* Caret TipTap — on masque le caret natif (trop discret) et on dessine à la
+   place un caret bloc clignotant en overlay (cf. extension BlinkingCaret), pour
+   que l'analyste voie clairement où il écrit, même après une rédaction IA. */
+.ProseMirror {
+  caret-color: transparent;
+}
+
+/* Caret bloc clignotant — <span> absolu posé dans le conteneur scrollable de
+   l'éditeur (data-editor-scroll) et positionné via view.coordsAtPos. */
+.blinking-caret {
+  position: absolute;
+  width: 2px;
+  background: #223061;
+  border-radius: 1px;
+  pointer-events: none;
+  z-index: 5;
+  animation: caret-blink 1.05s steps(1, end) infinite;
+}
+.dark .blinking-caret { background: #e8edf6; }
+@keyframes caret-blink {
+  0%, 50%      { opacity: 1; }
+  50.01%, 100% { opacity: 0; }
+}
+
+/* ─── Page A4 : éditeur de rapport ────────────────────────────────────────
+   Largeur d'une A4 portrait (210 mm ≈ 794 px à 96 dpi), padding type
+   « marges Word » (≈ 22 mm latéral, 24 mm haut/bas), ombre douce pour bien
+   détacher la page du fond de bureau. Hauteur min ≈ 1 A4 (1123 px) afin que
+   le widget reste utilisable même tant que le rapport est court. */
+.report-page {
+  background: #ffffff;
+  width: 794px;
+  max-width: 100%;
+  min-height: 1123px;
+  margin: 0 auto;
+  padding: 92px 84px;
+  box-shadow: 0 6px 24px -10px rgba(20, 45, 92, 0.25), 0 2px 6px -2px rgba(20, 45, 92, 0.10);
+  border-radius: 4px;
+  font-family: "Plus Jakarta Sans", "Inter", ui-sans-serif, system-ui, sans-serif;
+  color: #0f172a;
+  font-size: 13.5px;
+  line-height: 1.65;
+}
+.dark .report-page {
+  background: #171b2d;
+  color: #e8edf6;
+  box-shadow: 0 6px 24px -10px rgba(0, 0, 0, 0.6), 0 2px 6px -2px rgba(0, 0, 0, 0.4);
+}
+
+/* Hiérarchie réelle des titres dans la page rapport — sans ces règles tout
+   se confond visuellement (cf. l'export PDF où les sections ressemblaient à
+   des paragraphes en gras). */
+.report-page h1 {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.25;
+  color: #223061;
+  margin: 0 0 18px 0;
+  padding-bottom: 10px;
+  border-bottom: 2px solid #223061;
+  letter-spacing: -0.01em;
+}
+.dark .report-page h1 { color: #c9d4ea; border-bottom-color: #4a6fa5; }
+.report-page h2 {
+  font-size: 19px;
+  font-weight: 700;
+  color: #223061;
+  margin: 28px 0 10px 0;
+  letter-spacing: -0.005em;
+}
+.dark .report-page h2 { color: #c9d4ea; }
+.report-page h3 {
+  font-size: 15.5px;
+  font-weight: 700;
+  color: #1e3a72;
+  margin: 20px 0 6px 0;
+}
+.dark .report-page h3 { color: #93a4c4; }
+.report-page h4, .report-page h5, .report-page h6 {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1e3a72;
+  margin: 16px 0 4px 0;
+}
+.dark .report-page h4, .dark .report-page h5, .dark .report-page h6 { color: #93a4c4; }
+
+.report-page p {
+  margin: 0 0 12px 0;
+  text-align: justify;
+  hyphens: auto;
+}
+.report-page strong { font-weight: 700; color: #223061; }
+.dark .report-page strong { color: #c9d4ea; }
+.report-page em { font-style: italic; }
+
+.report-page ul, .report-page ol {
+  margin: 0 0 14px 0;
+  padding-left: 26px;
+}
+.report-page ul { list-style: disc; }
+.report-page ol { list-style: decimal; }
+.report-page li { margin: 4px 0; }
+.report-page li > p { margin: 0; }
+
+.report-page blockquote {
+  margin: 14px 0;
+  padding: 6px 14px;
+  border-left: 3px solid #223061;
+  background: rgba(34, 48, 97, 0.04);
+  color: #1e3a72;
+  font-style: italic;
+}
+.dark .report-page blockquote { background: rgba(147, 164, 196, 0.08); color: #c9d4ea; border-left-color: #4a6fa5; }
+
+.report-page code {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.88em;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+.dark .report-page code { background: #1f2742; border-color: #2a3354; }
+.report-page pre {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12.5px;
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 6px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  margin: 14px 0;
+}
+.report-page pre code { background: transparent; border: 0; padding: 0; color: inherit; }
+
+/* Tableaux GFM — rendu propre, alignements + en-tête contrasté. Sans ces
+   règles le tableau s'affiche en lignes blanches sans séparateurs lisibles. */
+.report-page table, .report-page .report-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 14px 0;
+  font-size: 12.5px;
+}
+.report-page th, .report-page td {
+  border: 1px solid #cbd5e1;
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+  min-width: 1em;
+  position: relative;
+}
+.dark .report-page th, .dark .report-page td { border-color: #2a3354; }
+.report-page th {
+  background: #f1f5f9;
+  color: #223061;
+  font-weight: 700;
+  border-bottom-width: 2px;
+}
+.dark .report-page th { background: #1f2742; color: #c9d4ea; }
+.report-page tr:nth-child(even) td { background: #f8fafc; }
+.dark .report-page tr:nth-child(even) td { background: #1a1f37; }
+
+.report-page hr {
+  border: 0;
+  border-top: 1px solid #cbd5e1;
+  margin: 22px 0;
+}
+.dark .report-page hr { border-top-color: #2a3354; }
+
+/* Rendu des documents convertis (Word .docx via mammoth, tableurs via SheetJS)
+   dans le widget « Lecteur de fichier ». Reprend la charte navy/crème des rapports. */
+.vf-doc h1, .vf-doc h2, .vf-doc h3 { color: #223061; font-weight: 700; margin: 14px 0 6px; }
+.dark .vf-doc h1, .dark .vf-doc h2, .dark .vf-doc h3 { color: #c9d4ea; }
+.vf-doc h1 { font-size: 18px; }
+.vf-doc h2 { font-size: 15px; }
+.vf-doc h3 { font-size: 13px; }
+.vf-doc p { margin: 6px 0; }
+.vf-doc ul, .vf-doc ol { margin: 6px 0; padding-left: 22px; }
+.vf-doc ul { list-style: disc; }
+.vf-doc ol { list-style: decimal; }
+.vf-doc a { color: #1d4ed8; text-decoration: underline; }
+.vf-doc img { max-width: 100%; height: auto; margin: 8px 0; }
+.vf-doc .vf-sheet-title { margin-top: 18px; }
+.vf-doc table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 12.5px; }
+.vf-doc th, .vf-doc td {
+  border: 1px solid #cbd5e1; padding: 6px 9px; text-align: left;
+  vertical-align: top; min-width: 1em;
+}
+.dark .vf-doc th, .dark .vf-doc td { border-color: #2a3354; }
+.vf-doc th { background: #f1f5f9; color: #223061; font-weight: 700; }
+.dark .vf-doc th { background: #1f2742; color: #c9d4ea; }
+.vf-doc tr:nth-child(even) td { background: #f8fafc; }
+.dark .vf-doc tr:nth-child(even) td { background: #1a1f37; }

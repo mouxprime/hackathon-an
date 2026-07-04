@@ -1,0 +1,196 @@
+# Stack Hémicycle — assistant citoyen de l'Assemblée nationale.
+# `docker compose up -d` démarre ; `docker compose --profile seed run --rm seed`
+# charge les données officielles AN (data.assemblee-nationale.fr) dans Postgres.
+#
+# `restart: unless-stopped` partout : un crash redémarre tout seul. C'est le cœur de
+# la résilience — un service redémarré reprend son état depuis Postgres / JetStream.
+#
+# Le fichier `.env` (gitignoré, cf. .env.example) porte la conf LLM (NVIDIA NIM)
+# et les endpoints MCP du hackathon.
+
+services:
+
+  # --- Infra ---
+
+  nats:
+    image: nats:2.10-alpine
+    # JetStream activé, store durable sur volume, monitoring HTTP.
+    command: ["-js", "-sd", "/data", "-m", "8222"]
+    ports:
+      - "14222:4222"                         # bus
+      - "18222:8222"                         # monitoring HTTP
+    volumes:
+      - natsdata:/data                       # JetStream survit à un redémarrage du conteneur
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8222/healthz || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: hemicycle
+      POSTGRES_PASSWORD: hemicycle
+      POSTGRES_DB: hemicycle
+    ports:
+      - "15432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro   # 00_extensions.sql (extension pgvector)
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hemicycle -d hemicycle"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "19200:9200"
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q '\"status\":\"\\(green\\|yellow\\)\"'"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # --- Services Hémicycle ---
+  # Les services appellent le LLM (NVIDIA NIM, OpenAI-compatible) directement via
+  # pydantic-ai (cf. hemicycle_shared.llm_client) — conf portée par `.env`.
+
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: gateway
+    env_file: [.env]
+    environment:
+      HEMI_AGENTS_BASE_URL: "http://localhost:18000"
+    ports:
+      - "18000:8000"
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      nats: { condition: service_healthy }
+      elasticsearch: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)\""]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: orchestrator
+    env_file: [.env]
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      nats: { condition: service_healthy }
+
+  # Note : pour conserver l'exposition d'un port stable par discipline tout en
+  # gardant le pool de pods en queue group NATS, on déclare UN service unique par
+  # discipline (sans `replicas`). Scaling : docker compose up --scale subagent-votes=N
+  # → tous les pods partagent le même queue group NATS et load-balancent les tâches.
+  subagent-votes:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: subagents
+    env_file: [.env]
+    environment:
+      HEMI_AGENT_ID: agent_votes
+      HEMI_A2A_PORT: "8600"
+      # URL A2A annoncée par le sub-agent. Défaut = service interne docker-compose.
+      HEMI_A2A_BASE_URL: "${HEMI_A2A_BASE_URL_VOTES:-http://subagent-votes:8600}"
+    ports:
+      - "18601:8600"                         # endpoint A2A v1.0 de l'agent Votes
+    restart: unless-stopped
+    depends_on:
+      nats: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+
+  subagent-deputes:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: subagents
+    env_file: [.env]
+    environment:
+      HEMI_AGENT_ID: agent_deputes
+      HEMI_A2A_PORT: "8600"
+      HEMI_A2A_BASE_URL: "${HEMI_A2A_BASE_URL_DEPUTES:-http://subagent-deputes:8600}"
+    ports:
+      - "18602:8600"                         # endpoint A2A v1.0 de l'agent Députés
+    restart: unless-stopped
+    depends_on:
+      nats: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+
+  subagent-lois:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: subagents
+    env_file: [.env]
+    environment:
+      HEMI_AGENT_ID: agent_lois
+      HEMI_A2A_PORT: "8600"
+      HEMI_A2A_BASE_URL: "${HEMI_A2A_BASE_URL_LOIS:-http://subagent-lois:8600}"
+    ports:
+      - "18603:8600"                         # endpoint A2A v1.0 de l'agent Lois
+    restart: unless-stopped
+    depends_on:
+      nats: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    # Pas d'URL gateway en dur : Vite proxifie /api et /ws vers le service `gateway`
+    # sur le réseau docker → le navigateur ne voit qu'une seule origine.
+    restart: unless-stopped
+    depends_on:
+      - gateway
+
+  # --- Seed (one-shot) : `docker compose --profile seed run --rm seed`, jamais avec `up` ---
+
+  seed:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: seed
+    env_file: [.env]
+    environment:
+      HEMI_AGENTS_BASE_URL: "http://localhost:18000"
+      HEMI_DATA_DIR: /app/svc/data
+    volumes:
+      - ./data:/app/svc/data                 # cache des ZIPs open data AN (gitignoré)
+    profiles: ["seed"]
+    depends_on:
+      postgres: { condition: service_healthy }
+
+volumes:
+  pgdata:
+  esdata:
+  natsdata:
