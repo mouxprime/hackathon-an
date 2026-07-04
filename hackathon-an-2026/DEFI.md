@@ -59,6 +59,7 @@ Citoyen ──WS──▶ Frontend React (chat + widgets VoteChart / FicheDepute
 
 ### Contributeurs
 - Maxime Ianni
+- Joseph Menard
 
 ### Ressources utilisées
 Cochez les ressources utilisées en remplaçant `[ ]` par `[x]`.
