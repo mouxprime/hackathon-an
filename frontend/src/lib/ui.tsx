@@ -43,19 +43,29 @@ export function agentEmoji(discipline?: string): string {
   return DISCIPLINE_EMOJI[(discipline || '').toUpperCase()] || '🤖'
 }
 
-// Libellé affiché d'un agent connu (nom produit) — repli sur l'id/discipline en majuscules.
+// Libellé affiché d'un agent connu (nom produit, SANS emoji — l'emoji est rendu
+// séparément par `agentEmoji`/`agentDisplay`, sinon il apparaît en double).
 // Clé acceptée : id technique (`agent_votes`) OU discipline (`votes`).
 const AGENT_LABELS: Record<string, string> = {
-  agent_votes: '🗳️ Agent Votes',
-  votes: '🗳️ Agent Votes',
-  agent_deputes: '🧑‍💼 Agent Députés',
-  deputes: '🧑‍💼 Agent Députés',
-  agent_lois: '📜 Agent Lois',
-  lois: '📜 Agent Lois',
+  agent_votes: 'Agent Votes',
+  votes: 'Agent Votes',
+  agent_deputes: 'Agent Députés',
+  deputes: 'Agent Députés',
+  agent_lois: 'Agent Lois',
+  lois: 'Agent Lois',
 }
 export function agentLabel(idOrDiscipline?: string): string {
   const key = (idOrDiscipline || '').toLowerCase()
   return AGENT_LABELS[key] || (idOrDiscipline || '').toUpperCase()
+}
+
+// Emoji + libellé en une seule chaîne — pour les sites qui n'affichent pas
+// d'avatar séparé (pyramide d'exécution, cartes d'agent du fil).
+export function agentDisplay(idOrDiscipline?: string): string {
+  const disc = (idOrDiscipline || '').toLowerCase().replace(/^agent_/, '')
+  const emoji = DISCIPLINE_EMOJI[disc.toUpperCase()]
+  const label = agentLabel(idOrDiscipline)
+  return emoji ? `${emoji} ${label}` : label
 }
 
 // Libellé citoyen d'un état FSM de l'orchestrateur — le « parcours de l'IA »

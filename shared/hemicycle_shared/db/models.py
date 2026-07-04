@@ -364,6 +364,29 @@ class Depute(Base):
     raw: Mapped[dict] = mapped_column(JSONB, default=dict)              # JSON open data brut
 
 
+class Circonscription(Base):
+    """Contour géographique d'une circonscription législative (data.gouv.fr, geojson).
+
+    Sert au « qui est mon député ? » par adresse : géocodage BAN (API Adresse) →
+    préfiltre SQL par bounding box → point-in-polygon (ray-casting Python côté
+    worker) — pas de PostGIS requis.
+    """
+
+    __tablename__ = "circonscriptions"
+
+    code: Mapped[str] = mapped_column(String, primary_key=True)         # ex. "7507"
+    dept_code: Mapped[str] = mapped_column(String, default="")          # ex. "75"
+    dept_nom: Mapped[str] = mapped_column(String, default="")           # ex. "Paris"
+    dept_normalise: Mapped[str] = mapped_column(String, default="")     # jointure avec deputes
+    circo_numero: Mapped[int] = mapped_column(Integer, default=0)
+    # Bounding box (lon/lat WGS84) — préfiltre avant le ray-casting.
+    bbox_minx: Mapped[float] = mapped_column(Float, default=0.0)
+    bbox_miny: Mapped[float] = mapped_column(Float, default=0.0)
+    bbox_maxx: Mapped[float] = mapped_column(Float, default=0.0)
+    bbox_maxy: Mapped[float] = mapped_column(Float, default=0.0)
+    geometrie: Mapped[dict] = mapped_column(JSONB, default=dict)        # geometry geojson
+
+
 class Scrutin(Base):
     """Scrutin public de l'AN — réf. `VTANR5L17V{n}`. Décomptes = syntheseVote officiel."""
 

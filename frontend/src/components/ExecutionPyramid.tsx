@@ -12,7 +12,7 @@
 
 import { useMemo, useState } from 'react'
 import type { Progress, UIEvent } from '../lib/types'
-import { Bar, FSM_COLORS, Pill, STATUS_COLORS, agentLabel, fsmLabel } from '../lib/ui'
+import { Bar, FSM_COLORS, Pill, STATUS_COLORS, agentDisplay, fsmLabel } from '../lib/ui'
 import { useT } from '../lib/i18n'
 
 type TaskNode = {
@@ -89,7 +89,7 @@ function TaskCard({ task, overrideProgress }: { task: TaskNode; overrideProgress
       >
         <span className="mono text-[10px] text-slate-400 dark:text-slate-500">{open ? '▾' : '▸'}</span>
         <span className="mono text-[11px] font-semibold text-slate-800 dark:text-slate-100">
-          {agentLabel(task.agent_type)}
+          {agentDisplay(task.agent_type)}
         </span>
         <Pill label={task.status} cls={STATUS_COLORS[task.status]} />
         <span className="ml-auto mono text-[10px] text-slate-400 dark:text-slate-500">

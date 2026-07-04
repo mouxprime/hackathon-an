@@ -17,7 +17,6 @@ import { MonitoringView } from './views/MonitoringView'
 import { WorkflowsView } from './views/WorkflowsView'
 import { HeaderStatus } from './components/HeaderStatus'
 import { FlagToggle } from './components/FlagToggle'
-import { UserAccount } from './components/UserAccount'
 import { useConvStore } from './lib/store'
 import { Toaster } from './lib/toast'
 import { useI18n, useT } from './lib/i18n'
@@ -63,8 +62,6 @@ export function App() {
         </button>
 
         <div className="ml-auto flex items-center gap-3">
-          <UserAccount />
-          <span className="h-4 w-px bg-white/20" />
           <FlagToggle />
           <HeaderStatus />
         </div>

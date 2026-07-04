@@ -2216,7 +2216,10 @@ async def test_tool(tool_id: int) -> dict:
         name, schema = t.name, t.input_schema
 
     args = _sample_args(schema)
-    if agent is None or agent.transport != "a2a" or not agent.card_url:
+    # Testable dès qu'une Agent Card est déclarée : les workers INTERNES (transport
+    # NATS pour le dispatch orchestrateur) exposent AUSSI un serveur A2A sur :8600 —
+    # le test passe par lui sans toucher au canal de dispatch.
+    if agent is None or not agent.card_url:
         return {
             "tool_id": tool_id,
             "name": name,
@@ -2224,7 +2227,7 @@ async def test_tool(tool_id: int) -> dict:
             "skipped": True,
             "args": args,
             "latency_ms": 0.0,
-            "detail": "agent interne (transport NATS) — non testable directement depuis la gateway",
+            "detail": "aucune Agent Card déclarée pour cet agent — test indisponible",
         }
 
     hard_timeout = float(agent.hard_timeout_s or 120)

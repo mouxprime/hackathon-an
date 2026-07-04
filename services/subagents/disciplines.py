@@ -14,11 +14,14 @@ Enrichissements externes, tous en échec-doux (la base locale répond toujours) 
 """
 
 import asyncio
+import json
 import logging
 import os
 import re
 import unicodedata
 from datetime import date
+
+import httpx
 
 from sqlalchemy import text
 
@@ -146,7 +149,6 @@ _CIVIX_BASE = os.environ.get("HEMI_CIVIX_BASE_URL", "https://www.civix.fr/api/v1
 
 async def _civix_get(trace, path: str, fr: bool = True):
     """GET CIVIX avec timeout 5 s. Échec → tool_result d'erreur tracé + None."""
-    import httpx
     url = f"{_CIVIX_BASE}{path}"
     await trace("tool_call", {"tool": "civix_api", "endpoint": url, "params": {}})
     try:
@@ -235,6 +237,119 @@ def _extract_date(txt_norm: str) -> date | None:
 def _extract_scrutin_numero(txt_norm: str) -> int | None:
     m = re.search(r"scrutin\s*(?:n\s*[°o]?\s*)?(\d+)", txt_norm)
     return int(m.group(1)) if m else None
+
+
+# --- « Qui est mon député ? » par adresse ------------------------------------------
+# Chaîne 100 % officielle : géocodage BAN (api-adresse.data.gouv.fr) → contours des
+# circonscriptions (data.gouv.fr, table `circonscriptions`, préfiltre bbox SQL) →
+# point-in-polygon par ray-casting en Python pur (pas de PostGIS).
+
+_ADDRESS_HINTS = ("j habite", "mon adresse", "je vis", "je reside", "chez moi")
+
+
+def _extract_address(query: str) -> str | None:
+    """Adresse probable dans la question (code postal 5 chiffres ou « j'habite… »)."""
+    flat = re.sub(r"[^a-z0-9]+", " ", _norm(query))
+    if not re.search(r"\b\d{5}\b", query) and not any(h in flat for h in _ADDRESS_HINTS):
+        return None
+    for part in re.split(r"[?!.\n]", query):
+        if re.search(r"\b\d{5}\b", part):
+            cleaned = re.sub(
+                r"(?i).*?(j'habite(?:\s+au)?|mon adresse(?:\s+est)?|je vis(?:\s+au)?|je réside(?:\s+au)?)\s*[:,]?\s*",
+                "", part).strip()
+            return cleaned or part.strip()
+    return None
+
+
+async def _ban_geocode(trace, address: str) -> dict | None:
+    """Géocode une adresse via l'API Adresse officielle (Base Adresse Nationale)."""
+    url = "https://api-adresse.data.gouv.fr/search/"
+    await trace("tool_call", {"tool": "api_adresse_geocode",
+                              "mcp_server": "api-adresse.data.gouv.fr (BAN officielle)",
+                              "endpoint": url, "params": {"q": address[:120]}})
+    try:
+        async with httpx.AsyncClient(timeout=6.0) as http:
+            r = await http.get(url, params={"q": address, "limit": 1})
+            r.raise_for_status()
+            feats = (r.json() or {}).get("features") or []
+        if not feats:
+            await trace("tool_result", {"tool": "api_adresse_geocode", "count": 0,
+                                        "preview": "adresse introuvable dans la BAN"})
+            return None
+        f = feats[0]
+        lon, lat = (f.get("geometry") or {}).get("coordinates", [None, None])[:2]
+        label = (f.get("properties") or {}).get("label", "")
+        await trace("tool_result", {"tool": "api_adresse_geocode",
+                                    "preview": f"{label} → ({lat:.4f}, {lon:.4f})"})
+        return {"lon": lon, "lat": lat, "label": label}
+    except Exception as e:  # noqa: BLE001 - échec-doux, repli sur la recherche textuelle
+        await trace("tool_result", {"tool": "api_adresse_geocode",
+                                    "error": f"API Adresse indisponible ({type(e).__name__})"})
+        return None
+
+
+def _in_ring(x: float, y: float, ring: list) -> bool:
+    inside = False
+    j = len(ring) - 1
+    for i in range(len(ring)):
+        xi, yi = ring[i][0], ring[i][1]
+        xj, yj = ring[j][0], ring[j][1]
+        if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / (yj - yi) + xi:
+            inside = not inside
+        j = i
+    return inside
+
+
+def _in_geom(x: float, y: float, geom: dict) -> bool:
+    """Point dans une geometry geojson (Polygon/MultiPolygon, trous gérés)."""
+    def in_poly(poly: list) -> bool:
+        if not poly or not _in_ring(x, y, poly[0]):
+            return False
+        return not any(_in_ring(x, y, hole) for hole in poly[1:])
+    if geom.get("type") == "Polygon":
+        return in_poly(geom.get("coordinates") or [])
+    if geom.get("type") == "MultiPolygon":
+        return any(in_poly(p) for p in geom.get("coordinates") or [])
+    return False
+
+
+async def _circo_from_point(trace, lon: float, lat: float) -> dict | None:
+    """Circonscription contenant le point (préfiltre bbox SQL puis ray-casting)."""
+    await trace("tool_call", {"tool": "sql_circo_lookup",
+                              "params": {"lat": round(lat, 4), "lon": round(lon, 4)},
+                              "mcp_server": "opendata-an (base locale)"})
+    rows = await _rows(
+        """SELECT code, dept_code, dept_nom, dept_normalise, circo_numero, geometrie
+           FROM circonscriptions
+           WHERE :x BETWEEN bbox_minx AND bbox_maxx AND :y BETWEEN bbox_miny AND bbox_maxy""",
+        x=lon, y=lat)
+    for r in rows:
+        geom = r["geometrie"]
+        if isinstance(geom, str):
+            geom = json.loads(geom)
+        if _in_geom(lon, lat, geom):
+            await trace("tool_result", {"tool": "sql_circo_lookup",
+                                        "preview": f"{r['dept_nom']} — "
+                                                   f"{r['circo_numero']}e circonscription"})
+            return r
+    await trace("tool_result", {"tool": "sql_circo_lookup", "count": 0,
+                                "preview": "aucune circonscription trouvée pour ce point"})
+    return None
+
+
+async def _depute_by_circo(dept_normalise: str, numero: int) -> dict | None:
+    """Député (actif d'abord) d'une circonscription (département normalisé + numéro)."""
+    rows = await _rows(
+        """SELECT d.uid, d.nom, d.prenom, d.nom_complet, d.groupe_ref, d.actif,
+                  d.circo_departement, d.circo_numero, d.url_an, d.url_photo,
+                  o.libelle_abrege AS groupe_abrege, o.libelle AS groupe,
+                  o.couleur_associee AS groupe_couleur
+           FROM deputes d LEFT JOIN organes o ON o.uid = d.groupe_ref
+           WHERE lower(unaccent(d.circo_departement)) = :dept
+             AND ltrim(d.circo_numero::text, '0') = :n
+           ORDER BY d.actif DESC LIMIT 1""",
+        dept=dept_normalise, n=str(numero))
+    return rows[0] if rows else None
 
 
 async def _find_depute(txt: str) -> dict | None:
@@ -441,7 +556,28 @@ async def deputes_handler(td, progress, trace) -> dict:
     await progress(0.15, "recherche du député")
 
     dep = None
-    if not _tool_paused(td, "sql_depute_lookup"):
+    circo_note = ""
+    # Chemin ADRESSE d'abord (« j'habite … 75011 Paris ») : géocodage BAN officiel →
+    # contour officiel de circonscription → député. Passe AVANT la recherche par nom
+    # (une adresse contient des noms de rues qui ressemblent à des noms de députés).
+    address = _extract_address(query)
+    if address and not _tool_paused(td, "api_adresse_geocode"):
+        await trace("thinking", {"text": "Une adresse est mentionnée : je la localise via "
+                                         "l'API Adresse officielle (Base Adresse Nationale), "
+                                         "puis je retrouve la circonscription législative "
+                                         "par ses contours officiels."})
+        await progress(0.25, "géocodage de l'adresse")
+        geo = await _ban_geocode(trace, address)
+        if geo and geo.get("lon") is not None:
+            circo = await _circo_from_point(trace, geo["lon"], geo["lat"])
+            if circo:
+                dep = await _depute_by_circo(circo["dept_normalise"], circo["circo_numero"])
+                if dep:
+                    circo_note = (f"Adresse localisée : {geo['label']} → "
+                                  f"{circo['dept_nom']}, {circo['circo_numero']}e "
+                                  "circonscription (contours officiels data.gouv.fr).")
+
+    if dep is None and not _tool_paused(td, "sql_depute_lookup"):
         await trace("tool_call", {"tool": "sql_depute_lookup", "params": {"query": query[:100]},
                                   "mcp_server": "opendata-an (base locale)"})
         dep = await _find_depute(query)
@@ -543,10 +679,17 @@ async def deputes_handler(td, progress, trace) -> dict:
                 "url": "https://data.assemblee-nationale.fr/acteurs/deputes-en-exercice",
                 "snippet": "Registre officiel des députés et mandats (Licence Ouverte).",
                 "source": "data.assemblee-nationale.fr", "reliability": "A", "score": 1.0}]
+    if circo_note:
+        sources.append({"title": "Contours des circonscriptions législatives — data.gouv.fr",
+                        "url": "https://www.data.gouv.fr/fr/datasets/contours-geographiques-des-circonscriptions-legislatives/",
+                        "snippet": "Localisation de l'adresse via l'API Adresse (BAN) puis "
+                                   "les contours officiels des circonscriptions.",
+                        "source": "data.gouv.fr", "reliability": "A", "score": 1.0})
 
     await progress(0.85, "rédaction de la synthèse")
     brief = (f"{td.instruction}\n\nDONNÉES OFFICIELLES :\n"
-             f"- {depute_block['nom_complet']}, groupe : {depute_block['groupe'] or 'non renseigné'}, "
+             + (f"- {circo_note}\n" if circo_note else "")
+             + f"- {depute_block['nom_complet']}, groupe : {depute_block['groupe'] or 'non renseigné'}, "
              f"circonscription : {depute_block['circo']}, "
              f"{'mandat en cours' if depute_block['actif'] else 'ANCIEN député (mandat terminé)'}\n")
     if stats:

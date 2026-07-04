@@ -50,6 +50,7 @@ from hemicycle_shared.db import (
     AgentType,
     Channel,
     ChannelMessage,
+    Circonscription,
     Depute,
     Dossier,
     Organe,
@@ -93,6 +94,13 @@ URL_SCRUTINS = (
 URL_DOSSIERS = (
     "https://data.assemblee-nationale.fr/static/openData/repository/17/loi/"
     "dossiers_legislatifs/Dossiers_Legislatifs.json.zip"
+)
+# Contours géographiques des circonscriptions législatives (data.gouv.fr, geojson
+# simplifié p10, 5,4 MB, 559 features — vérifié HTTP 200 le 2026-07-04). Sert au
+# « qui est mon député ? » par adresse (géocodage BAN → point-in-polygon worker).
+URL_CIRCOS = (
+    "https://static.data.gouv.fr/resources/contours-geographiques-des-circonscriptions-"
+    "legislatives/20240613-191520/circonscriptions-legislatives-p10.geojson"
 )
 
 # Pages publiques officielles (patterns vérifiés HTTP 200 le 2026-07-04).
@@ -143,8 +151,23 @@ MCP_SERVERS = {
 
 
 def _mcp_refs(*names: str) -> list[dict]:
-    """Références MCP (format MCPServerRef) pour `agent_types.mcp_servers`."""
-    return [{"name": n, "url": MCP_SERVERS[n], "tools": []} for n in names]
+    """Références MCP (format MCPServerRef) pour `agent_types.mcp_servers`.
+
+    Seuls les serveurs CONFIGURÉS (URL non vide dans l'env) sont déclarés : un
+    serveur sans URL afficherait des boutons de test cassés dans l'UI Agents.
+    Renseigner HEMI_MCP_*_URL dans .env puis re-seeder pour les faire apparaître.
+    """
+    return [{"name": n, "url": MCP_SERVERS[n], "tools": []} for n in names if MCP_SERVERS[n]]
+
+
+# Agent Card A2A de chaque worker interne : le dispatch reste NATS (transport par
+# défaut), mais la gateway utilise cette carte pour les BOUTONS DE TEST des tools
+# (les workers montent un serveur A2A sur :8600, joignable sur le réseau compose).
+A2A_CARDS = {
+    "agent_votes": "http://subagent-votes:8600/.well-known/agent-card.json",
+    "agent_deputes": "http://subagent-deputes:8600/.well-known/agent-card.json",
+    "agent_lois": "http://subagent-lois:8600/.well-known/agent-card.json",
+}
 
 
 def _now() -> datetime:
@@ -249,6 +272,9 @@ MANIFESTS = [
         hard_timeout_s=120,
     ),
 ]
+# Agent Card de test (dispatch NATS inchangé — cf. A2A_CARDS).
+for _m in MANIFESTS:
+    _m.card_url = A2A_CARDS.get(_m.id)
 
 
 # --- Workflows pré-définis (chaînes d'agents proposées dans le popup Workflow) ---
@@ -285,15 +311,17 @@ SEED_WORKFLOWS = [
 
 
 # --- Tools natifs + MCP, par agent (alimente la table `tools` éditable depuis l'UI) ---
-def _mcp_tool(name: str) -> dict:
-    """Entrée `tools` pour un serveur MCP du hackathon (URL lue de l'env, vide = skip)."""
-    return {
+def _mcp_tool(name: str) -> list[dict]:
+    """Entrée `tools` pour un serveur MCP du hackathon — UNIQUEMENT s'il est configuré
+    (URL non vide dans l'env) : une entrée sans URL n'est pas testable depuis l'UI."""
+    if not MCP_SERVERS[name]:
+        return []
+    return [{
         "name": f"mcp_{name}",
-        "description": f"Serveur MCP « {name} » du hackathon (URL: "
-        f"{MCP_SERVERS[name] or 'non configurée — HEMI_MCP_' + name.upper() + '_URL'}).",
+        "description": f"Serveur MCP « {name} » du hackathon (URL: {MCP_SERVERS[name]}).",
         "input_schema": {"query": "str"},
         "source": "mcp",
-    }
+    }]
 
 
 TOOL_CATALOG: dict[str, list[dict]] = {
@@ -319,8 +347,8 @@ TOOL_CATALOG: dict[str, list[dict]] = {
             "input_schema": {"acteur_ref": "str", "limit": "int?"},
             "source": "native",
         },
-        _mcp_tool("moulineuse"),
-        _mcp_tool("parlement"),
+        *_mcp_tool("moulineuse"),
+        *_mcp_tool("parlement"),
     ],
     "agent_deputes": [
         {
@@ -338,14 +366,22 @@ TOOL_CATALOG: dict[str, list[dict]] = {
             "source": "native",
         },
         {
+            "name": "circo_par_adresse",
+            "description": "« Qui est mon député ? » par adresse : géocodage via "
+            "l'API Adresse officielle (BAN) puis point-in-polygon sur les contours "
+            "officiels des circonscriptions (data.gouv.fr, table `circonscriptions`).",
+            "input_schema": {"adresse": "str"},
+            "source": "native",
+        },
+        {
             "name": "groupe_stats",
             "description": "Composition et effectifs des groupes politiques "
             "(table `organes`, type GP, couleur officielle).",
             "input_schema": {"groupe_ref": "str?"},
             "source": "native",
         },
-        _mcp_tool("moulineuse"),
-        _mcp_tool("parlement"),
+        *_mcp_tool("moulineuse"),
+        *_mcp_tool("parlement"),
     ],
     "agent_lois": [
         {
@@ -362,9 +398,9 @@ TOOL_CATALOG: dict[str, list[dict]] = {
             "input_schema": {"dossier_uid": "str"},
             "source": "native",
         },
-        _mcp_tool("moulineuse"),
-        _mcp_tool("parlement"),
-        _mcp_tool("justicelibre"),
+        *_mcp_tool("moulineuse"),
+        *_mcp_tool("parlement"),
+        *_mcp_tool("justicelibre"),
     ],
 }
 
@@ -405,12 +441,13 @@ async def _download(url: str, dest: Path, attempts: int = 3) -> Path:
 
 
 async def _download_all() -> dict[str, Path]:
-    """Télécharge (ou lit du cache) les 4 archives AN nécessaires au seed."""
+    """Télécharge (ou lit du cache) les archives AN + contours des circonscriptions."""
     return {
         "amo50": await _download(URL_AMO50, DATA_DIR / "AMO50_acteurs_mandats_organes_divises.json.zip"),
         "amo10": await _download(URL_AMO10, DATA_DIR / "AMO10_deputes_actifs_mandats_actifs_organes.json.zip"),
         "scrutins": await _download(URL_SCRUTINS, DATA_DIR / "Scrutins.json.zip"),
         "dossiers": await _download(URL_DOSSIERS, DATA_DIR / "Dossiers_Legislatifs.json.zip"),
+        "circos": await _download(URL_CIRCOS, DATA_DIR / "circonscriptions-legislatives-p10.geojson"),
     }
 
 
@@ -801,6 +838,48 @@ async def _seed_registry(sm) -> None:
     )
 
 
+def _circo_rows(path: Path) -> list[dict]:
+    """Parse le geojson officiel des contours → lignes `circonscriptions` avec bbox.
+
+    `codeCirconscription` = "{dept}{num:02d}" (ex. "7507") ; la bbox couvre tous les
+    anneaux extérieurs (Polygon comme MultiPolygon) — le point-in-polygon exact est
+    fait côté worker (ray-casting), la bbox n'est qu'un préfiltre.
+    """
+    gj = json.loads(path.read_text())
+    rows: list[dict] = []
+    for f in _as_list(gj.get("features")):
+        props = f.get("properties") or {}
+        geom = f.get("geometry") or {}
+        code = str(props.get("codeCirconscription") or "")
+        dept_code = str(props.get("codeDepartement") or "")
+        if not code or not geom:
+            continue
+        num_txt = code[len(dept_code):] if code.startswith(dept_code) else code[-2:]
+        try:
+            numero = int(num_txt)
+        except ValueError:
+            continue
+        polys = geom.get("coordinates") or []
+        if geom.get("type") == "Polygon":
+            polys = [polys]
+        xs = [pt[0] for poly in polys for ring in poly[:1] for pt in ring]
+        ys = [pt[1] for poly in polys for ring in poly[:1] for pt in ring]
+        if not xs:
+            continue
+        dept_nom = str(props.get("nomDepartement") or "")
+        rows.append({
+            "code": code,
+            "dept_code": dept_code,
+            "dept_nom": dept_nom,
+            "dept_normalise": _norm(dept_nom),
+            "circo_numero": numero,
+            "bbox_minx": min(xs), "bbox_miny": min(ys),
+            "bbox_maxx": max(xs), "bbox_maxy": max(ys),
+            "geometrie": geom,
+        })
+    return rows
+
+
 async def _seed_assemblee(sm, paths: dict[str, Path]) -> None:
     """Ingestion AN : organes, députés, scrutins + votes, dossiers curés."""
     # --- organes + députés (AMO) ---
@@ -863,6 +942,11 @@ async def _seed_assemblee(sm, paths: dict[str, Path]) -> None:
     await _copy_rows(sm, Dossier, curated)
     log.info("dossiers : %d parsés, %d curés insérés, erreurs ignorées : %d",
              len(all_rows), len(curated), derr)
+
+    # --- contours des circonscriptions (geojson data.gouv.fr) ---
+    circos = _circo_rows(paths["circos"])
+    await _copy_rows(sm, Circonscription, circos, batch=100)
+    log.info("circonscriptions : %d contours insérés (bbox pré-calculées)", len(circos))
 
 
 async def _verify(sm) -> list[str]:

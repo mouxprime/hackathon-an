@@ -12,7 +12,7 @@ import { useMemo, useState } from 'react'
 import { useT } from '../lib/i18n'
 import { useReportStreamStore } from '../lib/store'
 import type { PlanStep, Progress, UIEvent } from '../lib/types'
-import { agentLabel } from '../lib/ui'
+import { agentDisplay } from '../lib/ui'
 import { traceCallLabel } from '../lib/traceLabels'
 import { AUTO_APPROVE_PLAN } from '../lib/hooks'
 import { Markdown } from './Markdown'
@@ -823,7 +823,7 @@ function PlanCard({ data, corrIds, taskByCorr, resultByCorr, reportEnabled, repo
           <PlanRow
             key={p.step.plan_step_id ?? i}
             index={i}
-            label={agentLabel(p.step.agent_type)}
+            label={agentDisplay(p.step.agent_type)}
             instruction={p.step.instruction}
             status={p.status}
             agentData={p.task}
@@ -1046,7 +1046,7 @@ function AgentCard({ stepIdx, task, result, traces, progress, liveText }: {
   const chipState: 'running' | 'done' | 'failed' | 'waiting' =
     isRunning ? 'running' : isWaiting ? 'waiting' : isDone ? 'done' : 'failed'
   const [open, setOpen] = useState(false)
-  const agentType = task?.agent_type ? agentLabel(task.agent_type) : t('chat.agentFallback')
+  const agentType = task?.agent_type ? agentDisplay(task.agent_type) : t('chat.agentFallback')
   const summary = result?.summary || result?.reply || agentResultCountLabel(result, t) || progress?.note
 
   // Mode pill (done + replié) — 1 ligne : Step X + nom de l'agent + puce d'état
